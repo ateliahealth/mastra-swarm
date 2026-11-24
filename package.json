@@ -3,6 +3,14 @@
   "version": "0.0.0",
   "description": "Swarm-style multi-agent handoffs for Mastra, ported from LangGraph Swarm",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ateliahealth/mastra-swarm.git"
+  },
+  "homepage": "https://github.com/ateliahealth/mastra-swarm#readme",
+  "bugs": {
+    "url": "https://github.com/ateliahealth/mastra-swarm/issues"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
