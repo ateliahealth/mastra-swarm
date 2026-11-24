@@ -119,6 +119,8 @@ See [examples/nested.ts](examples/nested.ts).
 
 A custom `store` gets `get(ref, scope?)` and `set(ref, agentName, scope?)`, where `scope` is undefined for the top-level swarm and a nested swarm's name below it. The default store keeps them in thread metadata as `activeAgent` and `activeAgent:<swarm name>`.
 
+After a handoff, the agent that takes over has no new user message to answer, only the handoff. So the swarm sends it a one-off system message, never saved to the thread, telling it to reply to the user's most recent message. Replace it with `handoffPrompt: ({ from, to, target }) => '...'`, or turn it off with `handoffPrompt: false`.
+
 Pass `activeAgent` to start one turn with a particular agent. `maxHandoffs` (default 10) caps handoffs within a single turn, so two agents passing the conversation back and forth fail loudly instead of looping.
 
 **`getHandoffDestinations(agent)`** lists the agents an agent can hand off to. **`getHandoffDestination(tool)`** returns a single handoff tool's target.

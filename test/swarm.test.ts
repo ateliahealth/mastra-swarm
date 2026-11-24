@@ -302,3 +302,41 @@ describe('createSwarm validation (ported from langgraph-swarm)', () => {
     await expect(swarm.generate('hi', thread())).rejects.toThrow(/needs memory/);
   });
 });
+
+describe('handoff prompt', () => {
+  const systemTexts = (prompt: { role: string; content: unknown }[]) =>
+    prompt.filter((m) => m.role === 'system').map((m) => String(m.content));
+
+  it('tells the agent that receives a handoff to answer the user, for that call only', async () => {
+    const { model, calls } = scriptedModel(recordedReplies);
+    const { alice, bob } = aliceAndBob(model);
+    const swarm = createSwarm({ agents: [alice, bob], defaultActiveAgent: 'Alice' });
+
+    await swarm.generate("i'd like to speak to Bob", thread());
+    await swarm.generate("what's 5 + 7?", thread());
+
+    const handedTo = (n: number) => systemTexts(calls[n].prompt).some((t) => /handed to you by Alice/.test(t));
+    expect(systemTexts(calls[0].prompt).some((t) => /handed to you/.test(t))).toBe(false);
+    expect(handedTo(1)).toBe(true);
+    expect(systemTexts(calls[2].prompt).some((t) => /handed to you/.test(t))).toBe(false);
+    expect(systemTexts(calls[3].prompt).some((t) => /handed to you by Bob/.test(t))).toBe(true);
+  });
+
+  it('can be replaced or turned off', async () => {
+    const { model, calls } = scriptedModel(recordedReplies.slice(0, 2));
+    const { alice, bob } = aliceAndBob(model);
+    const custom = createSwarm({
+      agents: [alice, bob],
+      defaultActiveAgent: 'Alice',
+      handoffPrompt: ({ from, to }) => `custom ${from} -> ${to}`,
+    });
+    await custom.generate("i'd like to speak to Bob", thread('custom'));
+    expect(systemTexts(calls[1].prompt)).toContain('custom Alice -> Bob');
+
+    const off = scriptedModel(recordedReplies.slice(0, 2));
+    const pair = aliceAndBob(off.model);
+    const silent = createSwarm({ agents: [pair.alice, pair.bob], defaultActiveAgent: 'Alice', handoffPrompt: false });
+    await silent.generate("i'd like to speak to Bob", thread('silent'));
+    expect(systemTexts(off.calls[1].prompt).some((t) => /handed to you/.test(t))).toBe(false);
+  });
+});

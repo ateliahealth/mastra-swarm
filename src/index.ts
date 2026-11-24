@@ -7,6 +7,7 @@ export {
 } from './handoff';
 export {
   createSwarm,
+  defaultHandoffPrompt,
   type ActiveAgentStore,
   type CreateSwarmParams,
   type Handoff,

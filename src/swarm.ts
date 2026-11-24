@@ -32,6 +32,12 @@ export interface CreateSwarmParams {
   store?: ActiveAgentStore;
   /** Most handoffs allowed in one turn before the swarm gives up. Defaults to 10. */
   maxHandoffs?: number;
+  /**
+   * A system message for the agent that receives a handoff, sent with that call only and never saved.
+   * Without one, a model often answers the transfer ("Transferred.") or nothing at all instead of the user.
+   * `false` turns it off.
+   */
+  handoffPrompt?: ((handoff: Handoff) => string) | false;
 }
 
 export interface SwarmCallOptions {
@@ -40,6 +46,9 @@ export interface SwarmCallOptions {
   activeAgent?: string;
   requestContext?: RequestContext;
 }
+
+export const defaultHandoffPrompt = ({ from }: Handoff) =>
+  `The conversation was just handed to you by ${from}. Reply now to the user's most recent message, as if they had asked you directly. Do not mention the handoff.`;
 
 export interface Handoff {
   from: string;
@@ -190,7 +199,7 @@ function index(tree: SwarmTree, prefix: string[] = [], into = new Map<string, st
 
 /** Creates a swarm: agents hand the conversation to each other, and each thread remembers who is active. */
 export function createSwarm(params: CreateSwarmParams): Swarm {
-  const { store, maxHandoffs = 10 } = params;
+  const { store, maxHandoffs = 10, handoffPrompt = defaultHandoffPrompt } = params;
   const root = buildTree(params);
   const paths = index(root);
 
@@ -285,6 +294,7 @@ export function createSwarm(params: CreateSwarmParams): Swarm {
 
     const requestContext = options.requestContext ?? new RequestContext();
     let input: MessageInput = messages;
+    let receivedHandoff: Handoff | undefined;
 
     for (;;) {
       const current = path.at(-1)!;
@@ -296,6 +306,7 @@ export function createSwarm(params: CreateSwarmParams): Swarm {
         memory: options.memory,
         requestContext,
         stopWhen: () => requestContext.has(METADATA_KEY_HANDOFF_DESTINATION),
+        ...(receivedHandoff && handoffPrompt ? { system: handoffPrompt(receivedHandoff) } : {}),
       });
 
       let text = '';
@@ -325,6 +336,7 @@ export function createSwarm(params: CreateSwarmParams): Swarm {
       const handoff: Handoff = next === to ? { from: current, to } : { from: current, to, target: next };
       result.handoffs.push(handoff);
       yield { type: 'swarm-handoff', payload: handoff };
+      receivedHandoff = handoff;
       input = [];
     }
   }

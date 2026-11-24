@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- The agent that receives a handoff now gets a one-off system message telling it to answer the user's most recent message. Without it, a model often replied to the transfer ("Transferred.") or with nothing at all, because its last input was the handoff's tool result rather than a user message. The message goes with that one call and is never saved to the thread.
+- `handoffPrompt` on `createSwarm` replaces the message (`({ from, to, target }) => string`) or turns it off (`false`). `defaultHandoffPrompt` is exported.
+
 ## 0.2.0
 
 - Nested swarms: a swarm can be a member of another swarm. A nested swarm needs a `name`, which is its handoff target. Each level remembers its own active member, follow-ups go straight to the active agent at any depth, and coming back to a nested swarm resumes its last active agent.

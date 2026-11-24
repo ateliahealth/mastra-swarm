@@ -66,6 +66,7 @@ describe('package exports (ported from langgraph-swarm test_import)', () => {
         'METADATA_KEY_HANDOFF_DESTINATION',
         'createHandoffTool',
         'createSwarm',
+        'defaultHandoffPrompt',
         'getHandoffDestination',
         'getHandoffDestinations',
       ].sort(),
