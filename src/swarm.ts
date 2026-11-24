@@ -88,8 +88,8 @@ function threadMetadataStore(memory: MastraMemory): ActiveAgentStore {
   };
 }
 
-// Mastra folds a run's reply into the previous assistant row unless that row carries this flag,
-// which would make the next agent's first tool call look like a parallel call of the agent that handed off.
+// Before @mastra/core 1.76 (mastra-ai/mastra#26685), a run continuing a thread folded its first tool call into the
+// previous assistant row unless that row carried this flag, so the call read as a parallel call of the agent that handed off.
 async function endResponseAt(agent: AnyAgent, messageId: string, requestContext: RequestContext) {
   const memory = await agent.getMemory({ requestContext });
   const messages = await memory?.storage.getStore('memory');

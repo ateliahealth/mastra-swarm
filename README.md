@@ -108,7 +108,7 @@ Pass `activeAgent` to start one turn with a particular agent. `maxHandoffs` (def
 | Handoff tool returns `Command({ goto })`       | Handoff tool flags the target in the request context; `stopWhen` ends the agent's run there |
 | Shared `messages` state                        | Every agent uses the same memory thread                           |
 
-After a handoff, the swarm marks the handing-off agent's last message as the end of its response, so the next agent's reply is stored as its own assistant message. Without that, Mastra folds the next agent's first tool call into the previous agent's message, and the model reads the two calls as one parallel step.
+After a handoff, the swarm marks the handing-off agent's last message as the end of its response, so the next agent's reply is stored as its own assistant message. Mastra before 1.76 folded a step that starts with a tool call into the previous step ([#26685](https://github.com/mastra-ai/mastra/pull/26685)), so the next agent's first tool call read to the model as a parallel call of the agent that handed off. On 1.76 and later the marker is not needed for that, and it does no harm.
 
 ## Requirements and limits
 
