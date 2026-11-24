@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- README: the end-of-reply marker after a handoff is only needed before `@mastra/core` 1.76, which fixed steps that start with a tool call being merged into the previous step. No behaviour changes.
+
 ## 0.1.0
 
 First release: swarm-style handoffs for Mastra, ported from LangGraph Swarm.

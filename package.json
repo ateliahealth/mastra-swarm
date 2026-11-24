@@ -1,6 +1,6 @@
 {
   "name": "@atelia/mastra-swarm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Swarm-style multi-agent handoffs for Mastra, ported from LangGraph Swarm",
   "license": "MIT",
   "repository": {
