@@ -1,6 +1,6 @@
 {
-  "name": "mastra-swarm",
-  "version": "0.0.0",
+  "name": "@atelia/mastra-swarm",
+  "version": "0.0.1",
   "description": "Swarm-style multi-agent handoffs for Mastra, ported from LangGraph Swarm",
   "license": "MIT",
   "repository": {
@@ -68,5 +68,9 @@
   "engines": {
     "node": ">=20"
   },
-  "packageManager": "pnpm@10.25.0"
+  "packageManager": "pnpm@10.25.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

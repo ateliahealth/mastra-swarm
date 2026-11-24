@@ -1,4 +1,4 @@
-# mastra-swarm
+# @atelia/mastra-swarm
 
 Swarm-style multi-agent handoffs for [Mastra](https://mastra.ai), ported from [LangGraph Swarm](https://github.com/langchain-ai/langgraphjs/tree/main/libs/langgraph-swarm).
 
@@ -9,7 +9,7 @@ Mastra's built-in multi-agent patterns are supervisors (`agents: {...}` on an ag
 ## Install
 
 ```bash
-npm install mastra-swarm
+npm install @atelia/mastra-swarm
 ```
 
 Requires `@mastra/core` 1.63 or newer (tested on 1.63 and 1.85) and `zod` 3.25+ or 4.
@@ -23,7 +23,7 @@ import { Memory } from '@mastra/memory';
 import { LibSQLStore } from '@mastra/libsql';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
-import { createHandoffTool, createSwarm } from 'mastra-swarm';
+import { createHandoffTool, createSwarm } from '@atelia/mastra-swarm';
 
 const model = openai('gpt-4o');
 const memory = new Memory({ storage: new LibSQLStore({ url: 'file:swarm.db' }) });
@@ -126,6 +126,10 @@ pnpm build
 ```
 
 The tests port every case from LangGraph Swarm's JavaScript and Python suites, plus the behaviour their code has that those suites don't cover.
+
+## Releasing
+
+Bump `version` in `package.json`, merge it, then push a matching tag (`v0.1.0` for version `0.1.0`). The [Publish workflow](.github/workflows/publish.yml) checks the tag against the version, runs the checks, and publishes to npm through trusted publishing with provenance. No npm token is stored anywhere.
 
 ## License
 
