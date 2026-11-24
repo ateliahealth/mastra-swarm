@@ -1,0 +1,17 @@
+# Changelog
+
+## 0.1.0
+
+First release: swarm-style handoffs for Mastra, ported from LangGraph Swarm.
+
+- `createHandoffTool` makes `transfer_to_<agent>` tools that hand the conversation to another agent.
+- `createSwarm` keeps each thread's active agent in its memory metadata, or in a store you provide, and sends every turn straight to that agent.
+- `generate` and `stream`; `stream` adds `swarm-agent-start` and `swarm-handoff` events to Mastra's chunks.
+- `getActiveAgent` and `setActiveAgent` to read or move a thread's active agent.
+- `maxHandoffs` stops agents passing a turn back and forth forever.
+- Each agent's reply is stored as its own assistant message, so a handoff never reads to the model as one parallel step.
+- Tested on `@mastra/core` 1.63 and the latest 1.x.
+
+## 0.0.1
+
+Published by hand to create the package on npm, so trusted publishing could be set up. Same code as 0.1.0, without provenance.
