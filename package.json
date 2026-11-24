@@ -1,0 +1,64 @@
+{
+  "name": "mastra-swarm",
+  "version": "0.0.0",
+  "description": "Swarm-style multi-agent handoffs for Mastra, ported from LangGraph Swarm",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "keywords": [
+    "mastra",
+    "agents",
+    "multi-agent",
+    "swarm",
+    "handoff",
+    "llm"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "example": "tsx examples/alice-bob.ts"
+  },
+  "peerDependencies": {
+    "@mastra/core": "^1.63.0",
+    "zod": "^3.25.0 || ^4.0.0"
+  },
+  "devDependencies": {
+    "@ai-sdk/azure": "^2.0.151",
+    "@ai-sdk/openai": "^2.0.143",
+    "@ai-sdk/provider": "^2.0.5",
+    "@mastra/core": "1.85.0",
+    "@mastra/memory": "1.41.2",
+    "@types/node": "^26.6.7",
+    "ai": "^5.0.292",
+    "tsup": "^9.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.1",
+    "zod": "^4.6.7"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.25.0"
+}
