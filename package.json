@@ -1,6 +1,6 @@
 {
   "name": "@atelia/mastra-swarm",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Swarm-style multi-agent handoffs for Mastra, ported from LangGraph Swarm",
   "license": "MIT",
   "repository": {
@@ -46,7 +46,8 @@
     "build": "tsup src/index.ts --format esm,cjs --dts --clean",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "example": "tsx examples/alice-bob.ts"
+    "example": "tsx examples/alice-bob.ts",
+    "example:nested": "tsx examples/nested.ts"
   },
   "peerDependencies": {
     "@mastra/core": "^1.63.0",

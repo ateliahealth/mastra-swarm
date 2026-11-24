@@ -83,17 +83,41 @@ for await (const chunk of output.fullStream) {
 console.log(await output.activeAgent);
 ```
 
-`fullStream` carries every Mastra chunk from every agent in the turn, plus `swarm-agent-start` and `swarm-handoff` events. `textStream`, `text`, `activeAgent` and `handoffs` are there too.
+`fullStream` carries every Mastra chunk from every agent in the turn, plus `swarm-agent-start` and `swarm-handoff` events. `textStream`, `text`, `activeAgent`, `activePath` and `handoffs` are there too.
+
+### Nested swarms
+
+A swarm can be a member of another swarm. Give the inner swarm a `name`, and other agents hand off to it by that name:
+
+```ts
+const workflows = createSwarm({
+  name: 'workflows',
+  agents: [workflowManager, intake, forms],
+  defaultActiveAgent: 'workflow-manager',
+});
+
+const clinic = createSwarm({ agents: [frontDesk, workflows], defaultActiveAgent: 'frontdesk' });
+```
+
+- `frontDesk` hands off with `createHandoffTool({ agentName: 'workflows' })`, and the conversation goes to the workflows swarm's active agent, or `workflow-manager` the first time.
+- Agents inside `workflows` hand off to each other, and leave by handing off to an agent outside it, such as `frontdesk`.
+- Each level remembers its own active member. A follow-up goes straight to the active agent however deep it is, and coming back to `workflows` resumes the agent that was last active there.
+- Names are unique across the whole tree, and any agent can hand off to any name in it, including an agent inside a nested swarm (`transfer_to_intake` from the front desk).
+- `activePath` and the `path` on `swarm-agent-start` give the names from the top down to the active agent, e.g. `['workflows', 'intake']`.
+
+See [examples/nested.ts](examples/nested.ts).
 
 ## API
 
 **`createHandoffTool({ agentName, name?, description? })`** returns a Mastra tool named `transfer_to_<agent_name>` (lowercased, whitespace to `_`) that hands the conversation to `agentName`. The default description is `Ask agent '<agentName>' for help`.
 
-**`createSwarm({ agents, defaultActiveAgent, store?, maxHandoffs? })`** returns a swarm with:
+**`createSwarm({ agents, defaultActiveAgent, name?, store?, maxHandoffs? })`** returns a swarm. `agents` takes agents and named swarms. It has:
 
-- `generate(messages, { memory: { thread, resource }, activeAgent?, requestContext? })` resolves to `{ text, activeAgent, handoffs }`.
+- `generate(messages, { memory: { thread, resource }, activeAgent?, requestContext? })` resolves to `{ text, activeAgent, activePath, handoffs }`. A handoff to a nested swarm is reported as `{ from, to, target }`, where `to` is the agent that answered and `target` the swarm's name.
 - `stream(messages, options)` returns the streaming output above.
-- `getActiveAgent({ thread, resource })` and `setActiveAgent({ thread, resource }, name)` read or move a thread's active agent, for example to send a user back to a triage agent.
+- `getActiveAgent({ thread, resource })`, `getActivePath(...)` and `setActiveAgent({ thread, resource }, name)` read or move a thread's active agent, for example to send a user back to a front-desk agent. `name` can be an agent at any level, or a nested swarm.
+
+A custom `store` gets `get(ref, scope?)` and `set(ref, agentName, scope?)`, where `scope` is undefined for the top-level swarm and a nested swarm's name below it. The default store keeps them in thread metadata as `activeAgent` and `activeAgent:<swarm name>`.
 
 Pass `activeAgent` to start one turn with a particular agent. `maxHandoffs` (default 10) caps handoffs within a single turn, so two agents passing the conversation back and forth fail loudly instead of looping.
 

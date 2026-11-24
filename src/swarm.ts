@@ -12,18 +12,23 @@ export interface ThreadRef {
   resource: string;
 }
 
-/** Where the swarm remembers each thread's active agent. Defaults to the thread's metadata. */
+/**
+ * Where the swarm remembers each thread's active member. Defaults to the thread's metadata.
+ * `scope` is undefined for the top-level swarm and the nested swarm's name below it.
+ */
 export interface ActiveAgentStore {
-  get(ref: ThreadRef): Promise<string | undefined>;
-  set(ref: ThreadRef, agentName: string): Promise<void>;
+  get(ref: ThreadRef, scope?: string): Promise<string | undefined>;
+  set(ref: ThreadRef, agentName: string, scope?: string): Promise<void>;
 }
 
 export interface CreateSwarmParams {
-  /** The agents in the swarm. Names must be unique. */
-  agents: AnyAgent[];
-  /** The agent that answers when a thread has no active agent yet. */
+  /** The agents and nested swarms in the swarm. Names must be unique across the whole tree. */
+  agents: Array<AnyAgent | Swarm>;
+  /** The member that answers when a thread has no active member yet: an agent or a nested swarm. */
   defaultActiveAgent: string;
-  /** Where to keep the active agent. Defaults to thread metadata in the default agent's memory. */
+  /** Required when this swarm is a member of another swarm. Other agents hand off to it by this name. */
+  name?: string;
+  /** Where to keep the active member. Defaults to thread metadata in the default agent's memory. */
   store?: ActiveAgentStore;
   /** Most handoffs allowed in one turn before the swarm gives up. Defaults to 10. */
   maxHandoffs?: number;
@@ -31,7 +36,7 @@ export interface CreateSwarmParams {
 
 export interface SwarmCallOptions {
   memory: ThreadRef;
-  /** Start this turn with this agent instead of the thread's active agent. */
+  /** Start this turn with this agent or nested swarm instead of the thread's active agent. */
   activeAgent?: string;
   requestContext?: RequestContext;
 }
@@ -39,17 +44,21 @@ export interface SwarmCallOptions {
 export interface Handoff {
   from: string;
   to: string;
+  /** The name the agent handed off to, when it was a nested swarm rather than `to` itself. */
+  target?: string;
 }
 
 export interface SwarmResult {
   text: string;
   activeAgent: string;
+  /** Names from the top-level swarm down to the active agent, e.g. `['workflows', 'Carl']`. */
+  activePath: string[];
   handoffs: Handoff[];
 }
 
 export type SwarmChunk =
   | ChunkType
-  | { type: 'swarm-agent-start'; payload: { agentName: string } }
+  | { type: 'swarm-agent-start'; payload: { agentName: string; path: string[] } }
   | { type: 'swarm-handoff'; payload: Handoff };
 
 export interface SwarmStreamOutput {
@@ -57,32 +66,59 @@ export interface SwarmStreamOutput {
   textStream: ReadableStream<string>;
   text: Promise<string>;
   activeAgent: Promise<string>;
+  activePath: Promise<string[]>;
   handoffs: Promise<Handoff[]>;
 }
 
-const ACTIVE_AGENT_KEY = 'activeAgent';
+const TREE = Symbol.for('mastra-swarm.tree');
+
+interface SwarmTree {
+  name?: string;
+  defaultActiveAgent: string;
+  members: Map<string, AnyAgent | SwarmTree>;
+}
+
+export interface Swarm {
+  readonly name?: string;
+  readonly [TREE]: SwarmTree;
+  /** Every agent in the swarm, nested swarms included, by name. */
+  readonly agents: Map<string, AnyAgent>;
+  stream(messages: MessageInput, options: SwarmCallOptions): SwarmStreamOutput;
+  generate(messages: MessageInput, options: SwarmCallOptions): Promise<SwarmResult>;
+  getActiveAgent(ref: ThreadRef): Promise<string>;
+  getActivePath(ref: ThreadRef): Promise<string[]>;
+  setActiveAgent(ref: ThreadRef, agentName: string): Promise<void>;
+}
+
+const isSwarm = (member: AnyAgent | Swarm): member is Swarm =>
+  typeof member === 'object' && member !== null && TREE in member;
+
+const isTree = (member: AnyAgent | SwarmTree): member is SwarmTree =>
+  'members' in member && member.members instanceof Map;
+
+const metadataKey = (scope?: string) => (scope ? `activeAgent:${scope}` : 'activeAgent');
 
 function threadMetadataStore(memory: MastraMemory): ActiveAgentStore {
   return {
-    async get({ thread }) {
+    async get({ thread }, scope) {
       const stored = await memory.getThreadById({ threadId: thread });
-      const active = stored?.metadata?.[ACTIVE_AGENT_KEY];
+      const active = stored?.metadata?.[metadataKey(scope)];
       return typeof active === 'string' ? active : undefined;
     },
-    async set({ thread, resource }, agentName) {
+    async set({ thread, resource }, agentName, scope) {
       const stored = await memory.getThreadById({ threadId: thread });
       if (!stored) {
         await memory.createThread({
           threadId: thread,
           resourceId: resource,
-          metadata: { [ACTIVE_AGENT_KEY]: agentName },
+          metadata: { [metadataKey(scope)]: agentName },
         });
         return;
       }
       await memory.updateThread({
         id: thread,
         title: stored.title ?? '',
-        metadata: { ...stored.metadata, [ACTIVE_AGENT_KEY]: agentName },
+        metadata: { ...stored.metadata, [metadataKey(scope)]: agentName },
       });
     },
   };
@@ -108,63 +144,132 @@ async function endResponseAt(agent: AnyAgent, messageId: string, requestContext:
   });
 }
 
-/** Creates a swarm: agents hand the conversation to each other, and each thread remembers who is active. */
-export function createSwarm({
-  agents,
-  defaultActiveAgent,
-  store,
-  maxHandoffs = 10,
-}: CreateSwarmParams) {
+function buildTree({ agents, defaultActiveAgent, name }: CreateSwarmParams): SwarmTree {
   if (agents.length === 0) throw new Error('A swarm needs at least one agent.');
 
-  const byName = new Map<string, AnyAgent>();
-  for (const agent of agents) {
-    if (!agent.name) throw new Error('Every agent in a swarm needs a name.');
-    if (byName.has(agent.name)) {
-      throw new Error(`Agent with name '${agent.name}' already exists. Agent names must be unique.`);
+  const members = new Map<string, AnyAgent | SwarmTree>();
+  const seen = new Set<string>();
+  const claim = (memberName: string) => {
+    if (seen.has(memberName)) {
+      throw new Error(`Agent with name '${memberName}' already exists. Agent names must be unique.`);
     }
-    byName.set(agent.name, agent);
-  }
-  if (!byName.has(defaultActiveAgent)) {
-    throw new Error(
-      `Default active agent '${defaultActiveAgent}' not found in agents ${[...byName.keys()].join(', ')}.`,
-    );
+    seen.add(memberName);
+  };
+
+  for (const member of agents) {
+    if (isSwarm(member)) {
+      const tree = member[TREE];
+      if (!tree.name) throw new Error('A swarm inside another swarm needs a name.');
+      claim(tree.name);
+      for (const nested of index(tree).keys()) claim(nested);
+      members.set(tree.name, tree);
+    } else {
+      if (!member.name) throw new Error('Every agent in a swarm needs a name.');
+      claim(member.name);
+      members.set(member.name, member);
+    }
   }
 
-  const agentNamed = (name: string) => {
-    const agent = byName.get(name);
-    if (!agent) throw new Error(`Agent '${name}' not found in the swarm.`);
-    return agent;
+  if (!members.has(defaultActiveAgent)) {
+    throw new Error(
+      `Default active agent '${defaultActiveAgent}' not found in agents ${[...members.keys()].join(', ')}.`,
+    );
+  }
+  return { name, defaultActiveAgent, members };
+}
+
+/** Every name in the tree, mapped to the member names leading to it from the tree's top. */
+function index(tree: SwarmTree, prefix: string[] = [], into = new Map<string, string[]>()) {
+  for (const [memberName, member] of tree.members) {
+    const path = [...prefix, memberName];
+    into.set(memberName, path);
+    if (isTree(member)) index(member, path, into);
+  }
+  return into;
+}
+
+/** Creates a swarm: agents hand the conversation to each other, and each thread remembers who is active. */
+export function createSwarm(params: CreateSwarmParams): Swarm {
+  const { store, maxHandoffs = 10 } = params;
+  const root = buildTree(params);
+  const paths = index(root);
+
+  const nodeAt = (path: string[]) => {
+    let node: AnyAgent | SwarmTree = root;
+    for (const step of path) node = (node as SwarmTree).members.get(step)!;
+    return node;
+  };
+
+  const pathTo = (name: string) => {
+    const path = paths.get(name);
+    if (!path) throw new Error(`Agent '${name}' not found in the swarm.`);
+    return path;
+  };
+
+  const agents = new Map<string, AnyAgent>();
+  for (const [name, path] of paths) {
+    const node = nodeAt(path);
+    if (!isTree(node)) agents.set(name, node);
+  }
+
+  const defaultAgentName = () => {
+    let node: SwarmTree = root;
+    for (;;) {
+      const member = node.members.get(node.defaultActiveAgent)!;
+      if (!isTree(member)) return node.defaultActiveAgent;
+      node = member;
+    }
   };
 
   async function resolveStore(): Promise<ActiveAgentStore> {
     if (store) return store;
-    const memory = await agentNamed(defaultActiveAgent).getMemory();
+    const defaultAgent = defaultAgentName();
+    const memory = await agents.get(defaultAgent)!.getMemory();
     if (!memory) {
       throw new Error(
-        `The swarm needs memory to remember the active agent: give '${defaultActiveAgent}' a memory, or pass a store to createSwarm.`,
+        `The swarm needs memory to remember the active agent: give '${defaultAgent}' a memory, or pass a store to createSwarm.`,
       );
     }
     return threadMetadataStore(memory);
   }
 
   async function validateHandoffs(requestContext?: RequestContext) {
-    for (const [name, agent] of byName) {
+    for (const [name, agent] of agents) {
       for (const destination of await getHandoffDestinations(agent, { requestContext })) {
-        if (!byName.has(destination)) {
+        if (!paths.has(destination)) {
           throw new Error(`'${name}' hands off to '${destination}', which is not in the swarm.`);
         }
       }
     }
   }
 
+  async function descend(activeStore: ActiveAgentStore, ref: ThreadRef, prefix: string[]): Promise<string[]> {
+    const tree = nodeAt(prefix) as SwarmTree;
+    const stored = await activeStore.get(ref, prefix.at(-1));
+    const memberName = stored && tree.members.has(stored) ? stored : tree.defaultActiveAgent;
+    const path = [...prefix, memberName];
+    return isTree(tree.members.get(memberName)!) ? descend(activeStore, ref, path) : path;
+  }
+
+  async function moveTo(activeStore: ActiveAgentStore, ref: ThreadRef, name: string): Promise<string[]> {
+    const path = pathTo(name);
+    for (const [depth, memberName] of path.entries()) {
+      await activeStore.set(ref, memberName, depth === 0 ? undefined : path[depth - 1]);
+    }
+    return isTree(nodeAt(path)) ? descend(activeStore, ref, path) : path;
+  }
+
+  async function getActivePath(ref: ThreadRef): Promise<string[]> {
+    return descend(await resolveStore(), ref, []);
+  }
+
   async function getActiveAgent(ref: ThreadRef): Promise<string> {
-    return (await (await resolveStore()).get(ref)) ?? defaultActiveAgent;
+    return (await getActivePath(ref)).at(-1)!;
   }
 
   async function setActiveAgent(ref: ThreadRef, agentName: string): Promise<void> {
-    agentNamed(agentName);
-    await (await resolveStore()).set(ref, agentName);
+    pathTo(agentName);
+    await moveTo(await resolveStore(), ref, agentName);
   }
 
   async function* run(
@@ -174,18 +279,20 @@ export function createSwarm({
   ): AsyncGenerator<SwarmChunk> {
     await validateHandoffs(options.requestContext);
     const activeStore = await resolveStore();
-    let current = options.activeAgent ?? (await activeStore.get(options.memory)) ?? defaultActiveAgent;
-    agentNamed(current);
-    if (options.activeAgent) await activeStore.set(options.memory, current);
+    let path = options.activeAgent
+      ? await moveTo(activeStore, options.memory, options.activeAgent)
+      : await descend(activeStore, options.memory, []);
 
     const requestContext = options.requestContext ?? new RequestContext();
     let input: MessageInput = messages;
 
     for (;;) {
+      const current = path.at(-1)!;
+      const agent = agents.get(current)!;
       requestContext.delete(METADATA_KEY_HANDOFF_DESTINATION);
-      yield { type: 'swarm-agent-start', payload: { agentName: current } };
+      yield { type: 'swarm-agent-start', payload: { agentName: current, path } };
 
-      const output = await agentNamed(current).stream(input, {
+      const output = await agent.stream(input, {
         memory: options.memory,
         requestContext,
         stopWhen: () => requestContext.has(METADATA_KEY_HANDOFF_DESTINATION),
@@ -202,6 +309,7 @@ export function createSwarm({
       if (!next) {
         result.text = text;
         result.activeAgent = current;
+        result.activePath = path;
         return;
       }
 
@@ -210,19 +318,21 @@ export function createSwarm({
           `Swarm exceeded maxHandoffs (${maxHandoffs}) in one turn: ${[...result.handoffs.map((h) => h.from), current, next].join(' -> ')}.`,
         );
       }
-      agentNamed(next);
-      await endResponseAt(agentNamed(current), output.messageId, requestContext);
-      const handoff = { from: current, to: next };
+      pathTo(next);
+      await endResponseAt(agent, output.messageId, requestContext);
+      path = await moveTo(activeStore, options.memory, next);
+      const to = path.at(-1)!;
+      const handoff: Handoff = next === to ? { from: current, to } : { from: current, to, target: next };
       result.handoffs.push(handoff);
       yield { type: 'swarm-handoff', payload: handoff };
-      await activeStore.set(options.memory, next);
-      current = next;
       input = [];
     }
   }
 
+  const emptyResult = (): SwarmResult => ({ text: '', activeAgent: '', activePath: [], handoffs: [] });
+
   function stream(messages: MessageInput, options: SwarmCallOptions): SwarmStreamOutput {
-    const result: SwarmResult = { text: '', activeAgent: '', handoffs: [] };
+    const result = emptyResult();
     let settle!: { resolve: (r: SwarmResult) => void; reject: (e: unknown) => void };
     const done = new Promise<SwarmResult>((resolve, reject) => (settle = { resolve, reject }));
     done.catch(() => undefined);
@@ -260,6 +370,9 @@ export function createSwarm({
       get activeAgent() {
         return done.then((r) => r.activeAgent);
       },
+      get activePath() {
+        return done.then((r) => r.activePath);
+      },
       get handoffs() {
         return done.then((r) => r.handoffs);
       },
@@ -267,14 +380,21 @@ export function createSwarm({
   }
 
   async function generate(messages: MessageInput, options: SwarmCallOptions): Promise<SwarmResult> {
-    const result: SwarmResult = { text: '', activeAgent: '', handoffs: [] };
+    const result = emptyResult();
     for await (const _chunk of run(messages, options, result)) {
       void _chunk;
     }
     return result;
   }
 
-  return { stream, generate, getActiveAgent, setActiveAgent, agents: byName };
+  return {
+    name: params.name,
+    [TREE]: root,
+    agents,
+    stream,
+    generate,
+    getActiveAgent,
+    getActivePath,
+    setActiveAgent,
+  };
 }
-
-export type Swarm = ReturnType<typeof createSwarm>;

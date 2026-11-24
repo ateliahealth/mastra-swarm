@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- Nested swarms: a swarm can be a member of another swarm. A nested swarm needs a `name`, which is its handoff target. Each level remembers its own active member, follow-ups go straight to the active agent at any depth, and coming back to a nested swarm resumes its last active agent.
+- Names must be unique across the whole tree, and any agent can hand off to any name in it.
+- `activePath` on results and stream output, `getActivePath` on the swarm, `path` on `swarm-agent-start`, and `target` on a handoff into a nested swarm.
+- A custom `ActiveAgentStore` receives a `scope`: undefined for the top-level swarm, the nested swarm's name below it.
+- Single-level swarms behave as in 0.1, and keep storing `activeAgent` in thread metadata.
+
 ## 0.1.1
 
 - README: the end-of-reply marker after a handoff is only needed before `@mastra/core` 1.76, which fixed steps that start with a tool call being merged into the previous step. No behaviour changes.
