@@ -306,20 +306,27 @@ describe('createSwarm validation (ported from langgraph-swarm)', () => {
 describe('handoff prompt', () => {
   const systemTexts = (prompt: { role: string; content: unknown }[]) =>
     prompt.filter((m) => m.role === 'system').map((m) => String(m.content));
+  const last = (prompt: { role: string; content: unknown }[]) => prompt.at(-1);
+  const mentionsHandoff = (prompt: { role: string; content: unknown }[]) =>
+    systemTexts(prompt).some((t) => /handed to you/.test(t));
 
-  it('tells the agent that receives a handoff to answer the user, for that call only', async () => {
+  it('ends the first call of the agent that receives a handoff with a reminder to answer the user', async () => {
     const { model, calls } = scriptedModel(recordedReplies);
-    const { alice, bob } = aliceAndBob(model);
+    const { alice, bob, memory } = aliceAndBob(model);
     const swarm = createSwarm({ agents: [alice, bob], defaultActiveAgent: 'Alice' });
 
     await swarm.generate("i'd like to speak to Bob", thread());
     await swarm.generate("what's 5 + 7?", thread());
 
-    const handedTo = (n: number) => systemTexts(calls[n].prompt).some((t) => /handed to you by Alice/.test(t));
-    expect(systemTexts(calls[0].prompt).some((t) => /handed to you/.test(t))).toBe(false);
-    expect(handedTo(1)).toBe(true);
-    expect(systemTexts(calls[2].prompt).some((t) => /handed to you/.test(t))).toBe(false);
-    expect(systemTexts(calls[3].prompt).some((t) => /handed to you by Bob/.test(t))).toBe(true);
+    expect(mentionsHandoff(calls[0].prompt)).toBe(false);
+    expect(last(calls[1].prompt)).toMatchObject({ role: 'system' });
+    expect(String(last(calls[1].prompt)?.content)).toMatch(/handed to you by Alice/);
+    expect(mentionsHandoff(calls[2].prompt)).toBe(false);
+    expect(String(last(calls[3].prompt)?.content)).toMatch(/handed to you by Bob/);
+    expect(mentionsHandoff(calls[4].prompt)).toBe(false);
+
+    const { messages } = await memory!.recall({ threadId: 'thread-1', resourceId: 'user-1' });
+    expect(JSON.stringify(messages)).not.toMatch(/handed to you/);
   });
 
   it('can be replaced or turned off', async () => {
@@ -331,12 +338,12 @@ describe('handoff prompt', () => {
       handoffPrompt: ({ from, to }) => `custom ${from} -> ${to}`,
     });
     await custom.generate("i'd like to speak to Bob", thread('custom'));
-    expect(systemTexts(calls[1].prompt)).toContain('custom Alice -> Bob');
+    expect(last(calls[1].prompt)).toMatchObject({ role: 'system', content: 'custom Alice -> Bob' });
 
     const off = scriptedModel(recordedReplies.slice(0, 2));
     const pair = aliceAndBob(off.model);
     const silent = createSwarm({ agents: [pair.alice, pair.bob], defaultActiveAgent: 'Alice', handoffPrompt: false });
     await silent.generate("i'd like to speak to Bob", thread('silent'));
-    expect(systemTexts(off.calls[1].prompt).some((t) => /handed to you/.test(t))).toBe(false);
+    expect(mentionsHandoff(off.calls[1].prompt)).toBe(false);
   });
 });

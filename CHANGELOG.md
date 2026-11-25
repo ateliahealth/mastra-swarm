@@ -2,8 +2,8 @@
 
 ## 0.2.1
 
-- The agent that receives a handoff now gets a one-off system message telling it to answer the user's most recent message. Without it, a model often replied to the transfer ("Transferred.") or with nothing at all, because its last input was the handoff's tool result rather than a user message. The message goes with that one call and is never saved to the thread.
-- `handoffPrompt` on `createSwarm` replaces the message (`({ from, to, target }) => string`) or turns it off (`false`). `defaultHandoffPrompt` is exported.
+- The agent that receives a handoff is reminded to answer the user. Without it, a model often replied to the transfer ("Transferred.") or with nothing at all, because its last input was the handoff's tool result rather than a user message. The reminder is a system message appended as the last message of that agent's first model call, for that call only and never saved to the thread. Mastra's per-call `system` and `context` options were not enough on their own: both go before the history, where the tool result still reads as the last word.
+- `handoffPrompt` on `createSwarm` replaces the reminder (`({ from, to, target }) => string`) or turns it off (`false`). `defaultHandoffPrompt` is exported.
 
 ## 0.2.0
 

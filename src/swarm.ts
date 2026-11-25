@@ -1,4 +1,4 @@
-import type { Agent } from '@mastra/core/agent';
+import type { Agent, AgentExecutionOptions } from '@mastra/core/agent';
 import type { MastraMemory } from '@mastra/core/memory';
 import { RequestContext } from '@mastra/core/request-context';
 import type { ChunkType } from '@mastra/core/stream';
@@ -6,6 +6,7 @@ import { METADATA_KEY_HANDOFF_DESTINATION, getHandoffDestinations } from './hand
 
 type AnyAgent = Agent<any, any, any>;
 type MessageInput = Parameters<AnyAgent['stream']>[0];
+type PrepareStep = NonNullable<AgentExecutionOptions['prepareStep']>;
 
 export interface ThreadRef {
   thread: string;
@@ -132,6 +133,33 @@ function threadMetadataStore(memory: MastraMemory): ActiveAgentStore {
     },
   };
 }
+
+type ModelCall = { prompt: Array<{ role: string; content: unknown }> };
+type ModelMethod = (options: ModelCall) => unknown;
+
+/** The model, with `text` appended as the last system message of every call it makes. Nothing is stored. */
+function withTrailingSystemMessage<T extends object>(model: T, text: string): T {
+  return new Proxy(model, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (property !== 'doStream' && property !== 'doGenerate') {
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return (options: ModelCall) =>
+        (value as ModelMethod).call(target, {
+          ...options,
+          prompt: [...options.prompt, { role: 'system', content: text }],
+        });
+    },
+  });
+}
+
+// Mastra places per-call `system` and `context` messages before the history, where the handoff's tool result
+// still reads as the last word; the reminder only works as the final message of the first call.
+const remindOnFirstStep =
+  (text: string): PrepareStep =>
+  ({ stepNumber, model }) =>
+    stepNumber === 0 ? { model: withTrailingSystemMessage(model, text) } : undefined;
 
 // Before @mastra/core 1.76 (mastra-ai/mastra#26685), a run continuing a thread folded its first tool call into the
 // previous assistant row unless that row carried this flag, so the call read as a parallel call of the agent that handed off.
@@ -306,7 +334,9 @@ export function createSwarm(params: CreateSwarmParams): Swarm {
         memory: options.memory,
         requestContext,
         stopWhen: () => requestContext.has(METADATA_KEY_HANDOFF_DESTINATION),
-        ...(receivedHandoff && handoffPrompt ? { system: handoffPrompt(receivedHandoff) } : {}),
+        ...(receivedHandoff && handoffPrompt
+          ? { prepareStep: remindOnFirstStep(handoffPrompt(receivedHandoff)) }
+          : {}),
       });
 
       let text = '';
