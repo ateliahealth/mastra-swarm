@@ -46,6 +46,10 @@ export interface SwarmCallOptions {
   /** Start this turn with this agent or nested swarm instead of the thread's active agent. */
   activeAgent?: string;
   requestContext?: RequestContext;
+  /** Aborts the running agent's call, and no further agent starts in this turn. */
+  abortSignal?: AbortSignal;
+  /** Passed to each agent's call: saves every step of its reply as it finishes rather than at the end. */
+  savePerStep?: boolean;
 }
 
 export const defaultHandoffPrompt = ({ from }: Handoff) =>
@@ -321,6 +325,11 @@ export function createSwarm(params: CreateSwarmParams): Swarm {
       : await descend(activeStore, options.memory, []);
 
     const requestContext = options.requestContext ?? new RequestContext();
+    const { abortSignal, savePerStep } = options;
+    const passThrough = {
+      ...(abortSignal ? { abortSignal } : {}),
+      ...(savePerStep === undefined ? {} : { savePerStep }),
+    };
     let input: MessageInput = messages;
     let receivedHandoff: Handoff | undefined;
 
@@ -331,6 +340,7 @@ export function createSwarm(params: CreateSwarmParams): Swarm {
       yield { type: 'swarm-agent-start', payload: { agentName: current, path } };
 
       const output = await agent.stream(input, {
+        ...passThrough,
         memory: options.memory,
         requestContext,
         stopWhen: () => requestContext.has(METADATA_KEY_HANDOFF_DESTINATION),
@@ -347,7 +357,7 @@ export function createSwarm(params: CreateSwarmParams): Swarm {
 
       const next = requestContext.get(METADATA_KEY_HANDOFF_DESTINATION) as string | undefined;
       requestContext.delete(METADATA_KEY_HANDOFF_DESTINATION);
-      if (!next) {
+      if (!next || abortSignal?.aborted) {
         result.text = text;
         result.activeAgent = current;
         result.activePath = path;

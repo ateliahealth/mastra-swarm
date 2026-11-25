@@ -113,7 +113,7 @@ See [examples/nested.ts](examples/nested.ts).
 
 **`createSwarm({ agents, defaultActiveAgent, name?, store?, maxHandoffs? })`** returns a swarm. `agents` takes agents and named swarms. It has:
 
-- `generate(messages, { memory: { thread, resource }, activeAgent?, requestContext? })` resolves to `{ text, activeAgent, activePath, handoffs }`. A handoff to a nested swarm is reported as `{ from, to, target }`, where `to` is the agent that answered and `target` the swarm's name.
+- `generate(messages, { memory: { thread, resource }, activeAgent?, requestContext?, abortSignal?, savePerStep? })` resolves to `{ text, activeAgent, activePath, handoffs }`. A handoff to a nested swarm is reported as `{ from, to, target }`, where `to` is the agent that answered and `target` the swarm's name.
 - `stream(messages, options)` returns the streaming output above.
 - `getActiveAgent({ thread, resource })`, `getActivePath(...)` and `setActiveAgent({ thread, resource }, name)` read or move a thread's active agent, for example to send a user back to a front-desk agent. `name` can be an agent at any level, or a nested swarm.
 
@@ -121,7 +121,7 @@ A custom `store` gets `get(ref, scope?)` and `set(ref, agentName, scope?)`, wher
 
 After a handoff, the agent that takes over has no new user message to answer, only the handoff. So the swarm appends a system message to the end of that agent's first model call, telling it to reply to the user's most recent message. It goes with that one call only and is never saved to the thread. Replace it with `handoffPrompt: ({ from, to, target }) => '...'`, or turn it off with `handoffPrompt: false`.
 
-Pass `activeAgent` to start one turn with a particular agent. `maxHandoffs` (default 10) caps handoffs within a single turn, so two agents passing the conversation back and forth fail loudly instead of looping.
+Pass `activeAgent` to start one turn with a particular agent. `abortSignal` and `savePerStep` go to every agent call in the turn, as they would on a single Mastra agent; once the signal aborts, no further agent starts, even if the running one had just handed off. `maxHandoffs` (default 10) caps handoffs within a single turn, so two agents passing the conversation back and forth fail loudly instead of looping.
 
 **`getHandoffDestinations(agent)`** lists the agents an agent can hand off to. **`getHandoffDestination(tool)`** returns a single handoff tool's target.
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0
+
+- `stream` and `generate` take `abortSignal` and `savePerStep` and pass them to every agent call in the turn. Before, the swarm dropped them, so a caller that disconnected could not stop the running agent, and a turn that failed partway lost its unsaved steps. Once the signal aborts, the swarm starts no further agent, including after a handoff the running agent had just made.
+
 ## 0.2.1
 
 - The agent that receives a handoff is reminded to answer the user. Without it, a model often replied to the transfer ("Transferred.") or with nothing at all, because its last input was the handoff's tool result rather than a user message. The reminder is a system message appended as the last message of that agent's first model call, for that call only and never saved to the thread. Mastra's per-call `system` and `context` options were not enough on their own: both go before the history, where the tool result still reads as the last word.

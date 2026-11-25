@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Agent } from '@mastra/core/agent';
 import { InMemoryStore } from '@mastra/core/storage';
 import { createTool } from '@mastra/core/tools';
@@ -246,6 +246,71 @@ describe('Swarm on Mastra', () => {
     for await (const delta of swarm.stream("i'd like to speak to Bob", thread()).textStream) text += delta;
 
     expect(text).toBe(BOB_GREETING);
+  });
+});
+
+const streamOptions = (spy: { mock: { calls: unknown[][] } }) =>
+  spy.mock.calls.map((call) => call[1]);
+
+describe('call options', () => {
+  it("passes the caller's abortSignal and savePerStep to every agent in the turn", async () => {
+    const { model } = scriptedModel(recordedReplies);
+    const { alice, bob } = aliceAndBob(model);
+    const aliceCalls = vi.spyOn(alice, 'stream');
+    const bobCalls = vi.spyOn(bob, 'stream');
+    const swarm = createSwarm({ agents: [alice, bob], defaultActiveAgent: 'Alice' });
+    const abortSignal = new AbortController().signal;
+
+    await swarm.generate("i'd like to speak to Bob", {
+      ...thread(),
+      abortSignal,
+      savePerStep: true,
+    });
+
+    for (const options of [...streamOptions(aliceCalls), ...streamOptions(bobCalls)]) {
+      expect(options).toMatchObject({ abortSignal, savePerStep: true });
+    }
+    expect(aliceCalls).toHaveBeenCalledTimes(1);
+    expect(bobCalls).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves savePerStep to the agent when the caller does not set it', async () => {
+    const { model } = scriptedModel([{ text: 'hi' }]);
+    const { alice, bob } = aliceAndBob(model);
+    const aliceCalls = vi.spyOn(alice, 'stream');
+    const swarm = createSwarm({ agents: [alice, bob], defaultActiveAgent: 'Alice' });
+
+    await swarm.generate('hello', thread());
+
+    const [options] = streamOptions(aliceCalls);
+    expect(options).not.toHaveProperty('savePerStep');
+    expect(options).not.toHaveProperty('abortSignal');
+  });
+
+  it('starts no further agent when the turn is aborted at a handoff', async () => {
+    const controller = new AbortController();
+    const { model, calls } = scriptedModel([
+      { toolCall: { name: 'transfer_to_bob' } },
+      { text: BOB_GREETING },
+    ]);
+    const { alice, bob } = aliceAndBob(model);
+    type Execute = (...args: unknown[]) => Promise<unknown>;
+    const handoff = (await alice.listTools())['transfer_to_bob'] as unknown as { execute: Execute };
+    const execute = handoff.execute.bind(handoff);
+    handoff.execute = async (...args) => {
+      const result = await execute(...args);
+      controller.abort();
+      return result;
+    };
+    const swarm = createSwarm({ agents: [alice, bob], defaultActiveAgent: 'Alice' });
+
+    const turn = await swarm.generate("i'd like to speak to Bob", {
+      ...thread(),
+      abortSignal: controller.signal,
+    });
+
+    expect(calls.map((c) => c.agent)).toEqual(['Alice']);
+    expect(turn.handoffs).toEqual([]);
   });
 });
 
